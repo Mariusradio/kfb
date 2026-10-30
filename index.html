@@ -99,11 +99,11 @@
   <button id="btnVal" disabled>VALIDATE</button>
   <button id="btnMeniu" aria-label="Menu">☰</button>
 </div>
-<div id="banner" class="info">Load the drawing (☰ → Load drawing), then Connect.</div>
+<div id="banner" class="info">Tap Connect (KFB_VISIO in ESP Setup).</div>
 <div id="zona">
   <svg id="desen" xmlns="http://www.w3.org/2000/svg"></svg>
-  <div id="gol">No drawing loaded.<br>On the PC: ESP Setup → “Export drawing for the tablet”.<br>
-    Copy the file to the tablet, then ☰ → Load drawing.</div>
+  <div id="gol">Tap Connect: the spots come from KFB_VISIO by Bluetooth.<br>
+    (KFB_VISIO must be in ESP Setup.)</div>
   <div id="legenda">
     <span><i style="background:#fff;border-style:dashed;border-color:#2563eb"></i>free</span>
     <span><i style="background:#fbbf24"></i>press 3×</span>
@@ -120,7 +120,7 @@
   </div>
 </div>
 <div id="meniu">
-  <button id="mIncarca">Load drawing…</button>
+  <button id="mIncarca">Load drawing from a file…</button>
   <button id="mAll">Refresh all spots</button>
   <button id="mLogin">Login (Setup password)…</button>
   <button id="mJurnal">Show / hide log</button>
@@ -153,6 +153,8 @@ const st = {
   muta: null,              // {id, from}: waiting for the target spot of a MOVE
   coada: Promise.resolve(),
   rest: "", wakeLock: null, W: 1000, H: 250,
+  locuriNoi: null,         // spots arriving by Bluetooth (LY ... LE)
+  imgNoua: null,           // drawing arriving by Bluetooth (IMG ... IE)
   vb: {x: 0, y: 0, w: 1000, h: 250},
 };
 
@@ -192,11 +194,18 @@ function aplicaLayout(l) {
   $("gol").style.display = "none";
   const svg = $("desen");
   svg.innerHTML = "";
-  const img = document.createElementNS(SVGNS, "image");
-  img.setAttribute("href", l.imagine);
-  img.setAttribute("x", 0); img.setAttribute("y", 0);
-  img.setAttribute("width", st.W); img.setAttribute("height", st.H);
-  svg.appendChild(img);
+  if (l.imagine) {
+    const img = document.createElementNS(SVGNS, "image");
+    img.setAttribute("href", l.imagine);
+    img.setAttribute("x", 0); img.setAttribute("y", 0);
+    img.setAttribute("width", st.W); img.setAttribute("height", st.H);
+    svg.appendChild(img);
+  } else {                                            // no drawing: white grid
+    svg.innerHTML = `<defs><pattern id="grila" width="25" height="25" patternUnits="userSpaceOnUse">
+      <path d="M25 0H0V25" fill="none" stroke="#e2e8f0" stroke-width="1"/></pattern></defs>
+      <rect x="0" y="0" width="${st.W}" height="${st.H}" fill="#f8fafc"/>
+      <rect x="0" y="0" width="${st.W}" height="${st.H}" fill="url(#grila)"/>`;
+  }
   const strat = document.createElementNS(SVGNS, "g");
   strat.id = "spoturi";
   svg.appendChild(strat);
@@ -243,7 +252,7 @@ function aplicaVb() {
   const zona = $("zona").getBoundingClientRect();
   const pxPeUnitate = zona.width / v.w;
   // names only when zoomed in enough (the drawing has its own labels); without a drawing: always
-  $("zona").classList.toggle("ascuns-nume", pxPeUnitate < 1.6 && !(st.layout && st.layout.fara_desen));
+  $("zona").classList.toggle("ascuns-nume", pxPeUnitate < 1.6 && !(st.layout && (st.layout.fara_desen || !st.layout.imagine)));
 }
 function potriveste() {
   const z = $("zona").getBoundingClientRect();
@@ -423,7 +432,7 @@ function laLinie(linie) {
       if (!st.layout || st.layout.kfb !== kfb) {
         const l = incarcaLayoutSalvat(kfb);
         if (l) aplicaLayout(l);
-        else banner(`Connected to KFB ${kfb}, but its drawing is not on this tablet: ☰ → Load drawing.`, "warn");
+        else banner(`Connected to KFB ${kfb}: waiting for its spots … (☰ → Refresh all spots)`, "warn");
       }
       if (st.layout) {
         const necunoscute = [...st.spots.keys()].filter(n => !st.el.has(n));
@@ -446,11 +455,72 @@ function laLinie(linie) {
       return;
     }
     case "PONG": banner("MASTER answers (" + p.slice(1).join(",") + ")", "ok"); return;
+    case "LY":                                        // spots by Bluetooth: header
+      if (p[2] === "same") return;
+      st.locuriNoi = {hash: p[1], n: +p[2], raport: parseFloat(p[3]), spoturi: []};
+      banner(`Receiving ${p[2]} spots from KFB_VISIO …`);
+      return;
+    case "LS":
+      if (st.locuriNoi) st.locuriNoi.spoturi.push({n: p.slice(4).join(","), x: +p[1], y: +p[2], d: +p[3]});
+      return;
+    case "LE": {
+      const ln = st.locuriNoi;
+      st.locuriNoi = null;
+      if (!ln || ln.hash !== p[1]) return;
+      if (ln.spoturi.length !== ln.n) { banner("Spots incomplete: ☰ → Refresh all spots.", "err"); return; }
+      const vechi = st.layout;
+      const pastreaza = vechi && vechi.imagine && Math.abs(vechi.raport - ln.raport) < 0.01;
+      const l = {tip: "kfb-tableta", versiune: 1, kfb: st.kfbConectat || (vechi && vechi.kfb) || 0,
+                 creat: new Date().toLocaleString(), raport: pastreaza ? vechi.raport : ln.raport, hash: ln.hash,
+                 imagine: pastreaza ? vechi.imagine : "", fara_desen: !pastreaza, spoturi: ln.spoturi};
+      salveazaLayout(l);
+      aplicaLayout(l);
+      banner(`${l.spoturi.length} spots received from KFB_VISIO.`, "ok");
+      return;
+    }
+    case "IMG":                                       // drawing by Bluetooth: header
+      st.imgNoua = {n: +p[1], len: +p[2], raport: parseFloat(p[3]), parti: new Array(+p[1]), primite: 0};
+      banner("Receiving the drawing: 0 %");
+      return;
+    case "IB": {
+      const im = st.imgNoua, i = +p[1];
+      if (!im || i >= im.n) return;
+      if (im.parti[i] === undefined) im.primite++;
+      im.parti[i] = p.slice(2).join(",");
+      if (im.primite % 20 === 0) banner(`Receiving the drawing: ${Math.round(100 * im.primite / im.n)} %`);
+      return;
+    }
+    case "IE": {
+      const im = st.imgNoua;
+      st.imgNoua = null;
+      if (!im) return;
+      const b64 = im.parti.join("");
+      if (im.primite !== im.n || b64.length !== im.len) {
+        banner(`Drawing incomplete (${im.primite} / ${im.n} pieces): send it again from KFB_VISIO.`, "err");
+        return;
+      }
+      const l = Object.assign({}, st.layout || {tip: "kfb-tableta", versiune: 1, kfb: st.kfbConectat || 0, spoturi: []});
+      l.imagine = "data:image/jpeg;base64," + b64;
+      l.raport = im.raport;
+      l.fara_desen = false;
+      salveazaLayout(l);
+      aplicaLayout(l);
+      banner("Drawing received.", "ok");
+      return;
+    }
   }
   if (linie.startsWith("KFB_VISIO:")) {
     banner(linie.replace("KFB_VISIO: ", ""), "ok");
+    const m = linie.match(/KFB (\d+)/);
+    if (m) {
+      st.kfbConectat = parseInt(m[1], 10);
+      if (!st.layout || st.layout.kfb !== st.kfbConectat) {
+        const l = incarcaLayoutSalvat(st.kfbConectat);
+        if (l) aplicaLayout(l);
+      }
+    }
     if (/LOGIN/.test(linie)) cereParola();
-    else trimite("WATCH");
+    else cereTot();
   }
 }
 
@@ -491,7 +561,7 @@ async function conectareGatt() {
   actualizeazaBara();
   try { st.wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
   // KFB_VISIO greets the tablet; if the greeting was missed, ask for the spots anyway
-  setTimeout(() => { if (st.conectat && !st.kfbConectat) trimite("WATCH"); }, 2500);
+  setTimeout(() => { if (st.conectat && !st.kfbConectat) cereTot(); }, 2500);
 }
 async function conecteaza() {
   if (!navigator.bluetooth) {
@@ -516,9 +586,14 @@ async function conecteaza() {
     else banner("Cannot connect: " + e.message + "  (KFB_VISIO in ESP Setup? Bluetooth + Location on?)", "err");
   }
 }
+function cereTot() {                                 // spots (only if they changed) + their states
+  const ok = st.layout && st.layout.kfb === st.kfbConectat && st.layout.hash;
+  trimite("LAYOUT," + (ok ? st.layout.hash : "0"));
+  trimite("WATCH");
+}
 function cereParola() {
   const p = prompt("Setup password of KFB_VISIO:");
-  if (p !== null) { trimite("LOGIN," + p); trimite("WATCH"); }
+  if (p !== null) { trimite("LOGIN," + p); cereTot(); }
 }
 
 // ---------------------------------------------------------------- buttons
@@ -535,7 +610,7 @@ document.addEventListener("pointerdown", e => {
   if (!e.target.closest("#meniu, #btnMeniu")) $("meniu").classList.remove("deschis");
 });
 $("mIncarca").onclick = () => { $("meniu").classList.remove("deschis"); $("fisier").click(); };
-$("mAll").onclick = () => { $("meniu").classList.remove("deschis"); if (st.conectat) trimite("WATCH"); };
+$("mAll").onclick = () => { $("meniu").classList.remove("deschis"); if (st.conectat) { trimite("LAYOUT,0"); trimite("WATCH"); } };
 $("mLogin").onclick = () => { $("meniu").classList.remove("deschis"); cereParola(); };
 $("mJurnal").onclick = () => { $("meniu").classList.remove("deschis"); $("jurnal").classList.toggle("deschis"); };
 $("jurnal").onclick = () => $("jurnal").classList.remove("deschis");
@@ -555,7 +630,7 @@ $("fisier").onchange = e => {
       salveazaLayout(l);
       aplicaLayout(l);
       banner(`Drawing of KFB ${l.kfb} loaded: ${l.spoturi.length} spots (exported ${l.creat}).`, "ok");
-      if (st.conectat) trimite("WATCH");
+      if (st.conectat) cereTot();
     } catch (err) {
       banner("This file cannot be used: " + err.message, "err");
     }
@@ -565,7 +640,7 @@ $("fisier").onchange = e => {
 
 // ---------------------------------------------------------------- start
 const salvat = incarcaLayoutSalvat(null);
-if (salvat) { aplicaLayout(salvat); banner(`Drawing of KFB ${salvat.kfb} ready. Tap Connect.`); }
+if (salvat) { aplicaLayout(salvat); banner(`KFB ${salvat.kfb}: ${salvat.spoturi.length} spots on this tablet. Tap Connect.`); }
 actualizeazaBara();
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(e => jurnal("offline cache: " + e));
