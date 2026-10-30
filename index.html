@@ -242,7 +242,8 @@ function aplicaVb() {
   $("desen").setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
   const zona = $("zona").getBoundingClientRect();
   const pxPeUnitate = zona.width / v.w;
-  $("zona").classList.toggle("ascuns-nume", pxPeUnitate < 1.6);   // names only when zoomed in enough
+  // names only when zoomed in enough (the drawing has its own labels); without a drawing: always
+  $("zona").classList.toggle("ascuns-nume", pxPeUnitate < 1.6 && !(st.layout && st.layout.fara_desen));
 }
 function potriveste() {
   const z = $("zona").getBoundingClientRect();
