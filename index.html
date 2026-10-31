@@ -32,6 +32,11 @@
   #spatiu { flex: 1; }
   #btnMeniu { background: #334155; color: #fff; font-size: 20px; padding: 8px 14px; }
 
+  #info { position: absolute; left: 12px; right: 12px; top: 12px; z-index: 4; display: none; background: #fff;
+          border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 14px 18px; font-size: 20px;
+          font-weight: 700; line-height: 1.4; }
+  #info.deschis { display: block; }
+  #info.err { background: #fee2e2; color: #7f1d1d; }
   #banner { min-height: 54px; padding: 10px 14px; font-size: 20px; font-weight: 700; display: flex;
             align-items: center; gap: 10px; background: #fff; border-bottom: 1px solid var(--border); }
   #banner.ok { background: #dcfce7; color: #14532d; }
@@ -43,22 +48,22 @@
   #desen { width: 100%; height: 100%; display: block; }
   #gol { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
          text-align: center; padding: 30px; font-size: 20px; color: var(--muted); }
-  .spot circle.c { stroke-width: 3; vector-effect: non-scaling-stroke; }
+  .spot .c { stroke-width: 3; vector-effect: non-scaling-stroke; }
   .spot text { font-weight: 700; paint-order: stroke; stroke: #fff; stroke-width: 4px; fill: #0f172a;
                vector-effect: non-scaling-stroke; pointer-events: none; }
   .ascuns-nume .spot text.nume { display: none; }
-  .st-F circle.c { fill: rgba(255,255,255,.55); stroke: #2563eb; stroke-dasharray: 6 4; }
-  .st-W circle.c { fill: #fbbf24; stroke: #b45309; animation: puls 1s infinite; }
-  .st-R circle.c { fill: #86efac; stroke: #15803d; }
-  .st-O circle.c { fill: #22c55e; stroke: #14532d; }
-  .st-P circle.c { fill: #15803d; stroke: #052e16; }
-  .st-X circle.c { fill: #94a3b8; stroke: #334155; }
-  .st-N circle.c { fill: #e2e8f0; stroke: #64748b; stroke-dasharray: 3 3; }
-  .st-L circle.c { fill: #facc15; stroke: #a16207; animation: puls .5s infinite; }
-  .st-U circle.c { fill: rgba(255,255,255,.4); stroke: #64748b; stroke-dasharray: 2 4; }
+  .st-F .c { fill: rgba(255,255,255,.55); stroke: #2563eb; stroke-dasharray: 6 4; }
+  .st-W .c { fill: #fbbf24; stroke: #b45309; animation: puls 1s infinite; }
+  .st-R .c { fill: #86efac; stroke: #15803d; }
+  .st-O .c { fill: #22c55e; stroke: #14532d; }
+  .st-P .c { fill: #15803d; stroke: #052e16; }
+  .st-X .c { fill: #94a3b8; stroke: #334155; }
+  .st-N .c { fill: #e2e8f0; stroke: #64748b; stroke-dasharray: 3 3; }
+  .st-L .c { fill: #facc15; stroke: #a16207; animation: puls .5s infinite; }
+  .st-U .c { fill: rgba(255,255,255,.4); stroke: #64748b; stroke-dasharray: 2 4; }
   .spot circle.inel { fill: none; stroke: #dc2626; stroke-width: 5; vector-effect: non-scaling-stroke; display: none; }
   .des circle.inel { display: inline; }
-  .ales circle.c { stroke: #db2777 !important; stroke-width: 6 !important; stroke-dasharray: none !important; }
+  .ales .c { stroke: #db2777 !important; stroke-width: 6 !important; stroke-dasharray: none !important; }
   @keyframes puls { 50% { opacity: .35; } }
 
   #legenda { position: absolute; left: 8px; bottom: 8px; background: rgba(255,255,255,.92); border-radius: 10px;
@@ -101,7 +106,6 @@
   <button id="btnVal" disabled>VALIDATE</button>
   <button id="btnMeniu" aria-label="Menu">☰</button>
 </div>
-<div id="banner" class="info">Tap Connect (KFB_VISIO in ESP Setup).</div>
 <div id="zona">
   <svg id="desen" xmlns="http://www.w3.org/2000/svg"></svg>
   <div id="gol">Tap Connect: the spots come from KFB_VISIO by Bluetooth.<br>
@@ -116,6 +120,7 @@
     <span><i style="background:#fff;border-color:#dc2626;border-width:3px"></i>designated</span>
   </div>
   <button id="btnFit">Fit</button>
+  <div id="info"></div>
   <div id="foaie">
     <div id="foaieTitlu"></div>
     <div id="foaieStare"></div>
@@ -155,7 +160,7 @@ const st = {
   ales: null,              // selected spot name
   muta: null,              // {id, from}: waiting for the target spot of a MOVE
   coada: Promise.resolve(),
-  rest: "", wakeLock: null, W: 1000, H: 250,
+  rest: "", wakeLock: null, W: 1000, H: 250, asteptInfo: false,
   locuriNoi: null,         // spots arriving by Bluetooth (LY ... LE)
   imgNoua: null,           // drawing arriving by Bluetooth (IMG ... IE)
   vb: {x: 0, y: 0, w: 1000, h: 250},
@@ -169,13 +174,21 @@ function jurnal(t) {
   j.scrollTop = j.scrollHeight;
 }
 function vibreaza(model) { try { navigator.vibrate && navigator.vibrate(model); } catch (e) {} }
-function banner(text, tip = "info") {
-  const b = $("banner");
-  b.textContent = text;
-  b.className = tip;
+function banner(text, tip = "info") {          // no message bar on the tablet: log + vibration only
+  jurnal("   [" + tip + "] " + text);
   if (tip === "ok") vibreaza(80);
   else if (tip === "err") vibreaza([200, 100, 200]);
 }
+let timerInfo = null;
+function arataInfo(text, eroare = false) {      // the only text shown over the drawing: the answer to "Info"
+  const i = $("info");
+  i.textContent = text.split(" · ").join("\n");
+  i.style.whiteSpace = "pre-line";
+  i.className = "deschis" + (eroare ? " err" : "");
+  clearTimeout(timerInfo);
+  timerInfo = setTimeout(() => { i.className = ""; }, 15000);
+}
+$("info").onclick = () => { $("info").className = ""; };
 
 // ---------------------------------------------------------------- drawing (layout)
 function salveazaLayout(l) {
@@ -217,9 +230,10 @@ function aplicaLayout(l) {
     const g = document.createElementNS(SVGNS, "g");
     g.dataset.n = s.n;
     const r = Math.max(s.d * st.W / 2, 4);
-    const c = document.createElementNS(SVGNS, "circle");
+    const c = document.createElementNS(SVGNS, "polygon");     // the holder: its shape like on the PC
     c.setAttribute("class", "c");
-    c.setAttribute("cx", s.x * st.W); c.setAttribute("cy", s.y * st.H); c.setAttribute("r", r);
+    g.dataset.cx = s.x * st.W; g.dataset.cy = s.y * st.H; g.dataset.r = r; g.dataset.forma = "cerc";
+    c.setAttribute("points", puncteForma("cerc", s.x * st.W, s.y * st.H, r));
     const tinta = document.createElementNS(SVGNS, "circle");   // bigger invisible touch target
     tinta.setAttribute("cx", s.x * st.W); tinta.setAttribute("cy", s.y * st.H); tinta.setAttribute("r", r * 1.6);
     tinta.setAttribute("fill", "transparent");
@@ -242,11 +256,34 @@ function aplicaLayout(l) {
   }
   potriveste();
 }
+const FORME = {cerc: "Circle", patrat: "Square", romb: "Diamond", triunghi: "Triangle", hexagon: "Hexagon",
+               dreptunghi: "Rectangle"};
+function puncteForma(f, cx, cy, r) {               // same corners as puncte_forma() in KFB_VISIO
+  let p;
+  if (f === "patrat") { const a = r * 0.9; p = [cx - a, cy - a, cx + a, cy - a, cx + a, cy + a, cx - a, cy + a]; }
+  else if (f === "romb") { const a = r * 1.15; p = [cx, cy - a, cx + a, cy, cx, cy + a, cx - a, cy]; }
+  else if (f === "triunghi") { const a = r * 1.25; p = [cx, cy - a, cx + a * 0.866, cy + a * 0.5, cx - a * 0.866, cy + a * 0.5]; }
+  else if (f === "hexagon") { const a = r * 1.05; p = []; for (let k = 0; k < 6; k++) p.push(cx + a * Math.cos(Math.PI / 3 * k), cy + a * Math.sin(Math.PI / 3 * k)); }
+  else if (f === "dreptunghi") p = [cx - r * 1.4, cy - r * 0.72, cx + r * 1.4, cy - r * 0.72, cx + r * 1.4, cy + r * 0.72, cx - r * 1.4, cy + r * 0.72];
+  else { p = []; for (let k = 0; k < 40; k++) p.push(cx + r * Math.cos(2 * Math.PI * k / 40), cy + r * Math.sin(2 * Math.PI * k / 40)); }
+  const t = [];
+  for (let i = 0; i < p.length; i += 2) t.push(p[i].toFixed(2) + "," + p[i + 1].toFixed(2));
+  return t.join(" ");
+}
+function detaliiSpot(s) {                           // paired spot: "D:patrat" = designated + shape
+  const [d, f] = (s.det || "").split(":");
+  return {des: !!s.id && d === "D", forma: (s.id && f && FORME[f]) ? f : "cerc"};
+}
 function deseneazaSpot(n) {
   const g = st.el.get(n);
   if (!g) return;
   const s = st.spots.get(n) || {cod: "U", id: 0, det: ""};
-  g.setAttribute("class", "spot st-" + s.cod + (s.id && s.det === "D" ? " des" : "") + (st.ales === n ? " ales" : ""));
+  const dt = detaliiSpot(s);
+  g.setAttribute("class", "spot st-" + s.cod + (dt.des ? " des" : "") + (st.ales === n ? " ales" : ""));
+  if (g.dataset.forma !== dt.forma) {
+    g.dataset.forma = dt.forma;
+    g.querySelector(".c").setAttribute("points", puncteForma(dt.forma, +g.dataset.cx, +g.dataset.cy, +g.dataset.r));
+  }
   const idText = g.querySelector("text.id");
   idText.textContent = s.id ? String(s.id) : (s.cod === "W" ? "#" + s.det : s.cod === "R" ? "✓" : "");
 }
@@ -372,7 +409,7 @@ function atingeSpot(n) {
   if (vechi) deseneazaSpot(vechi);
   deseneazaSpot(n);
   $("foaieTitlu").textContent = n + (s.id ? `  ·  ID ${s.id}` : "");
-  $("foaieStare").textContent = (TEXT_STARE[s.cod] || s.cod) + (s.id && s.det === "D" ? "  ·  DESIGNATED" : "");
+  $("foaieStare").textContent = (TEXT_STARE[s.cod] || s.cod) + (detaliiSpot(s).des ? "  ·  DESIGNATED" : "");
   $("foaieButoane").innerHTML = "";
   if (!st.conectat) {
     $("foaieStare").textContent += "  ·  connect first";
@@ -383,14 +420,19 @@ function atingeSpot(n) {
   } else if (s.cod === "W") {
     buton("Cancel this spot", "", () => { trimite(`UNMAP,${n}`); inchideFoaie(); });
   } else if (s.cod === "R") {
-    buton("Blink LED", "prim", () => trimite(`BLINK,${n}`));
     buton("Wrong board: take it off", "pericol", () => { trimite(`UNMAP,${n}`); inchideFoaie(); });
   } else if (s.id) {
-    if (s.cod !== "L") buton(s.det === "D" ? "Undesignate" : "Designate (test)", s.det === "D" ? "" : "verde",
+    if (s.cod !== "L") buton(detaliiSpot(s).des ? "Undesignate" : "Designate (test)", detaliiSpot(s).des ? "" : "verde",
                              () => trimite(`DESIGNATE,${s.id}`));
-    buton("Blink LED", "prim", () => trimite(`BLINK,${s.id}`));
     if (s.cod !== "X") buton(s.cod === "L" ? "LOCATE off" : "LOCATE on", "", () => trimite(`LOCATE,${s.id}`));
-    buton("Info", "", () => trimite(`INFO,${s.id}`));
+    buton("Info", "", () => { st.asteptInfo = true; trimite(`INFO,${s.id}`); inchideFoaie(); });
+    buton("Shape…", "", () => {                      // the 6 shapes, like "Shape ▶" on the PC
+      $("foaieButoane").innerHTML = "";
+      const acum = detaliiSpot(s).forma;
+      for (const [k, t] of Object.entries(FORME))
+        buton((k === acum ? "● " : "") + t, k === acum ? "prim" : "", () => { trimite(`SHAPE,${s.id},${k}`); inchideFoaie(); });
+      buton("Back", "", () => atingeSpot(n));
+    });
     buton("Move to another spot…", "", () => {
       st.muta = {id: s.id, from: n};
       inchideFoaie();
@@ -468,9 +510,13 @@ function laLinie(linie) {
       banner(t, t.startsWith("✔") ? "ok" : t.startsWith("✕") ? "err" : "warn");
       return;
     }
-    case "OK": banner(p.slice(1).join(","), "ok"); return;
+    case "OK":
+      if (st.asteptInfo) { st.asteptInfo = false; arataInfo(p.slice(1).join(",")); }
+      banner(p.slice(1).join(","), "ok");
+      return;
     case "ERR": {
       const t = p.slice(1).join(",");
+      if (st.asteptInfo) { st.asteptInfo = false; arataInfo(t, true); }
       banner(t, "err");
       if (/LOGIN/.test(t)) cereParola();
       return;
@@ -604,7 +650,11 @@ async function conecteaza() {
   } catch (e) {
     jurnal("connect error: " + e);
     if (String(e).includes("cancelled")) banner("No KFB chosen.");
-    else banner("Cannot connect: " + e.message + "  (KFB_VISIO in ESP Setup? Bluetooth + Location on?)", "err");
+    else {
+      banner("Cannot connect: " + e.message, "err");
+      $("stareConn").textContent = "Cannot connect"; $("stareConn").className = "pill off";
+      alert("Cannot connect.\n\nKFB_VISIO in ESP Setup? Bluetooth and Location on?\n\n" + e.message);
+    }
   }
 }
 function cereTot() {                                 // spots (only if they changed) + their states
