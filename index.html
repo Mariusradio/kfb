@@ -56,6 +56,8 @@
   .st-N circle.c { fill: #e2e8f0; stroke: #64748b; stroke-dasharray: 3 3; }
   .st-L circle.c { fill: #facc15; stroke: #a16207; animation: puls .5s infinite; }
   .st-U circle.c { fill: rgba(255,255,255,.4); stroke: #64748b; stroke-dasharray: 2 4; }
+  .spot circle.inel { fill: none; stroke: #dc2626; stroke-width: 5; vector-effect: non-scaling-stroke; display: none; }
+  .des circle.inel { display: inline; }
   .ales circle.c { stroke: #db2777 !important; stroke-width: 6 !important; stroke-dasharray: none !important; }
   @keyframes puls { 50% { opacity: .35; } }
 
@@ -111,6 +113,7 @@
     <span><i style="background:#22c55e"></i>paired</span>
     <span><i style="background:#94a3b8"></i>offline</span>
     <span><i style="background:#facc15"></i>LOCATE</span>
+    <span><i style="background:#fff;border-color:#dc2626;border-width:3px"></i>designated</span>
   </div>
   <button id="btnFit">Fit</button>
   <div id="foaie">
@@ -220,6 +223,9 @@ function aplicaLayout(l) {
     const tinta = document.createElementNS(SVGNS, "circle");   // bigger invisible touch target
     tinta.setAttribute("cx", s.x * st.W); tinta.setAttribute("cy", s.y * st.H); tinta.setAttribute("r", r * 1.6);
     tinta.setAttribute("fill", "transparent");
+    const inel = document.createElementNS(SVGNS, "circle");    // red ring = designated (LED red on the board)
+    inel.setAttribute("class", "inel");
+    inel.setAttribute("cx", s.x * st.W); inel.setAttribute("cy", s.y * st.H); inel.setAttribute("r", r * 1.35);
     const t = document.createElementNS(SVGNS, "text");
     t.setAttribute("class", "nume");
     t.setAttribute("x", s.x * st.W); t.setAttribute("y", s.y * st.H + r + 9);
@@ -229,7 +235,7 @@ function aplicaLayout(l) {
     id.setAttribute("class", "id");
     id.setAttribute("x", s.x * st.W); id.setAttribute("y", s.y * st.H + 3);
     id.setAttribute("text-anchor", "middle"); id.setAttribute("font-size", Math.max(5, r * 0.9));
-    g.append(tinta, c, t, id);
+    g.append(tinta, inel, c, t, id);
     strat.appendChild(g);
     st.el.set(s.n, g);
     deseneazaSpot(s.n);
@@ -240,7 +246,7 @@ function deseneazaSpot(n) {
   const g = st.el.get(n);
   if (!g) return;
   const s = st.spots.get(n) || {cod: "U", id: 0, det: ""};
-  g.setAttribute("class", "spot st-" + s.cod + (st.ales === n ? " ales" : ""));
+  g.setAttribute("class", "spot st-" + s.cod + (s.id && s.det === "D" ? " des" : "") + (st.ales === n ? " ales" : ""));
   const idText = g.querySelector("text.id");
   idText.textContent = s.id ? String(s.id) : (s.cod === "W" ? "#" + s.det : s.cod === "R" ? "✓" : "");
 }
@@ -356,12 +362,17 @@ function atingeSpot(n) {
     if (confirm(`Move ID ${m.id} from "${m.from}" to "${n}"?`)) trimite(`MOVE,${m.id},${n}`);
     return;
   }
+  if (st.conectat && st.pm.on && !st.pm.lot) {         // PAIR & MAP on: like a click in ESP Setup on the PC
+    if (s.cod === "F") { inchideFoaie(); trimite(`SELECT,${n}`); return; }   // free spot: selected at once
+    if (s.cod === "W") { inchideFoaie(); trimite(`UNMAP,${n}`); return; }    // tapped again: cancelled
+    if (s.cod === "R") trimite(`BLINK,${n}`);                                // placed board: its LED blinks
+  }
   const vechi = st.ales;
   st.ales = n;
   if (vechi) deseneazaSpot(vechi);
   deseneazaSpot(n);
   $("foaieTitlu").textContent = n + (s.id ? `  ·  ID ${s.id}` : "");
-  $("foaieStare").textContent = TEXT_STARE[s.cod] || s.cod;
+  $("foaieStare").textContent = (TEXT_STARE[s.cod] || s.cod) + (s.id && s.det === "D" ? "  ·  DESIGNATED" : "");
   $("foaieButoane").innerHTML = "";
   if (!st.conectat) {
     $("foaieStare").textContent += "  ·  connect first";
@@ -375,8 +386,11 @@ function atingeSpot(n) {
     buton("Blink LED", "prim", () => trimite(`BLINK,${n}`));
     buton("Wrong board: take it off", "pericol", () => { trimite(`UNMAP,${n}`); inchideFoaie(); });
   } else if (s.id) {
+    if (s.cod !== "L") buton(s.det === "D" ? "Undesignate" : "Designate (test)", s.det === "D" ? "" : "verde",
+                             () => trimite(`DESIGNATE,${s.id}`));
     buton("Blink LED", "prim", () => trimite(`BLINK,${s.id}`));
     if (s.cod !== "X") buton(s.cod === "L" ? "LOCATE off" : "LOCATE on", "", () => trimite(`LOCATE,${s.id}`));
+    buton("Info", "", () => trimite(`INFO,${s.id}`));
     buton("Move to another spot…", "", () => {
       st.muta = {id: s.id, from: n};
       inchideFoaie();
@@ -386,6 +400,13 @@ function atingeSpot(n) {
       if (confirm(`Unpair "${n}" (ID ${s.id})?\nThe board becomes a NEW board.`)) {
         trimite(`UNPAIR,${s.id}`);
         trimite(`UNPAIR,${s.id},YES`);
+        inchideFoaie();
+      }
+    });
+    buton("Remove", "pericol", () => {
+      if (confirm(`REMOVE "${n}" (ID ${s.id})?\nThe holder is deleted from the drawing and its board is unpaired.`)) {
+        trimite(`REMOVE,${s.id}`);
+        trimite(`REMOVE,${s.id},YES`);
         inchideFoaie();
       }
     });
@@ -604,7 +625,7 @@ $("btnPm").onclick = () => {
     trimite(st.pm.ready ? "PAIR,STOP,FORCE" : "PAIR,STOP");
   } else trimite("PAIR,START");
 };
-$("btnVal").onclick = () => { if (confirm(`Pair the ${st.pm.ready} placed board(s)?`)) trimite("VALIDATE"); };
+$("btnVal").onclick = () => trimite("VALIDATE");     // like VALIDATE on the PC: no question
 $("btnMeniu").onclick = () => $("meniu").classList.toggle("deschis");
 document.addEventListener("pointerdown", e => {
   if (!e.target.closest("#meniu, #btnMeniu")) $("meniu").classList.remove("deschis");
