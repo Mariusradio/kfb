@@ -140,7 +140,7 @@
 <script>
 "use strict";
 // =====================================================================
-//  KFB tablet page: PAIR & MAP, Blink, LOCATE, Unpair and Move for the SLAVE boards of one KFB.
+//  KFB tablet page: PAIR & MAP, LOCATE, Unpair and remove, Move for the SLAVE boards of one KFB.
 //  Bluetooth LE (Nordic UART service) to the MASTER of the KFB; the MASTER relays to KFB_VISIO,
 //  which does all the work exactly like the clicks in ESP Setup. The drawing comes from a file
 //  exported by KFB_VISIO ("Export drawing for the tablet") and is kept on the tablet.
@@ -438,19 +438,9 @@ function atingeSpot(n) {
       inchideFoaie();
       banner(`Tap the FREE spot where ID ${s.id} goes (tap "${n}" again to cancel).`, "warn");
     });
-    buton("Unpair", "pericol", () => {
-      if (confirm(`Unpair "${n}" (ID ${s.id})?\nThe board becomes a NEW board.`)) {
-        trimite(`UNPAIR,${s.id}`);
-        trimite(`UNPAIR,${s.id},YES`);
-        inchideFoaie();
-      }
-    });
-    buton("Remove", "pericol", () => {
-      if (confirm(`REMOVE "${n}" (ID ${s.id})?\nThe holder is deleted from the drawing and its board is unpaired.`)) {
-        trimite(`REMOVE,${s.id}`);
-        trimite(`REMOVE,${s.id},YES`);
-        inchideFoaie();
-      }
+    buton("Unpair and remove", "pericol", () => {   // KFB_VISIO asks back (ASK,...) with the recipes affected
+      trimite(`REMOVE,${s.id}`);
+      inchideFoaie();
     });
   }
   buton("Close", "", inchideFoaie);
@@ -483,6 +473,15 @@ function laLinie(linie) {
       else st.spots.set(nume, {cod: p[1], id: parseInt(p[2], 10) || 0, det: p[3] || ""});
       deseneazaSpot(nume);
       if (st.ales === nume && $("foaie").classList.contains("deschis")) atingeSpot(nume);
+      return;
+    }
+    case "ASKT":                                   // text for the next question (recipes / products)
+      st.askText = (st.askText || "") + p.slice(1).join(",");
+      return;
+    case "ASK": {                                  // ASK,<command>,<id>,<question> -> confirm -> <command>,<id>,YES
+      const intrebare = p.slice(3).join(",") + (st.askText ? "\n\n" + st.askText.trim() : "");
+      st.askText = "";
+      if (confirm(intrebare)) trimite(`${p[1]},${p[2]},YES`);
       return;
     }
     case "PM":
