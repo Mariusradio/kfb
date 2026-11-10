@@ -84,6 +84,10 @@
   #foaieButoane button.prim { background: var(--accent); color: #fff; }
   #foaieButoane button.pericol { background: #fee2e2; color: #991b1b; }
   #foaieButoane button.verde { background: var(--ok); color: #fff; }
+  .testled { display: flex; justify-content: center; gap: 26px; width: 100%; margin: 4px 0 12px; }
+  #foaieButoane .testled button.cerc { width: 120px; height: 120px; border-radius: 50%; padding: 0; color: #fff;
+            font-size: 16px; font-weight: 800; border: 6px solid transparent; opacity: .45; }
+  #foaieButoane .testled button.cerc.ales { opacity: 1; border-color: #0f172a; }
 
   #meniu { position: absolute; right: 10px; top: 64px; background: #fff; border-radius: 12px; z-index: 6;
            box-shadow: 0 6px 24px rgba(0,0,0,.25); display: none; flex-direction: column; min-width: 260px; overflow: hidden; }
@@ -108,8 +112,8 @@
 </div>
 <div id="zona">
   <svg id="desen" xmlns="http://www.w3.org/2000/svg"></svg>
-  <div id="gol">Tap Connect: the spots come from KFB_VISIO by Bluetooth.<br>
-    (KFB_VISIO must be in ESP Setup.)</div>
+  <div id="gol">Tap Connect: the spots come from VIBE by Bluetooth.<br>
+    (VIBE must be in ESP Setup.)</div>
   <div id="legenda">
     <span><i style="background:#fff;border-style:dashed;border-color:#2563eb"></i>free</span>
     <span><i style="background:#fbbf24"></i>press 3×</span>
@@ -141,9 +145,9 @@
 "use strict";
 // =====================================================================
 //  KFB tablet page: PAIR & MAP, LOCATE, Unpair and remove, Move for the SLAVE boards of one KFB.
-//  Bluetooth LE (Nordic UART service) to the MASTER of the KFB; the MASTER relays to KFB_VISIO,
+//  Bluetooth LE (Nordic UART service) to the MASTER of the KFB; the MASTER relays to VIBE,
 //  which does all the work exactly like the clicks in ESP Setup. The drawing comes from a file
-//  exported by KFB_VISIO ("Export drawing for the tablet") and is kept on the tablet.
+//  exported by VIBE ("Export drawing for the tablet") and is kept on the tablet.
 // =====================================================================
 const NUS = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
 const NUS_RX = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";   // tablet -> MASTER
@@ -203,10 +207,34 @@ function incarcaLayoutSalvat(kfb) {
     return t ? JSON.parse(t) : null;
   } catch (e) { return null; }
 }
+function kfbConectatAcum(kfb) {
+  // the white "KFB n" = the KFB this tablet is connected to; its drawing only (never the drawing of another KFB)
+  if (!Number.isFinite(kfb) || kfb <= 0) return;
+  st.kfbConectat = kfb;
+  if (st.layout && !(st.layout.kfb > 0)) {           // drawing received before the KFB number was known: it is this KFB's
+    st.layout.kfb = kfb;
+    salveazaLayout(st.layout);
+  }
+  if (!st.layout || st.layout.kfb !== kfb) {
+    let l = incarcaLayoutSalvat(kfb);
+    if (!l) {                                          // a drawing saved without a KFB number (older page): it is this KFB's
+      const l0 = incarcaLayoutSalvat(0);
+      if (l0) { l = Object.assign(l0, {kfb}); salveazaLayout(l); try { localStorage.removeItem("kfb_layout_0"); } catch (e) {} }
+    }
+    if (l) aplicaLayout(l);
+    else {                                             // no drawing of THIS KFB on the tablet yet
+      st.layout = null;
+      $("desen").innerHTML = "";
+      st.el = new Map();
+      $("gol").style.display = "";
+      banner(`Connected to KFB ${kfb}: waiting for its spots … (☰ → Refresh all spots)`, "warn");
+    }
+  }
+  $("titlu").textContent = "KFB " + kfb;
+}
 function aplicaLayout(l) {
   st.layout = l;
   st.W = 1000; st.H = 1000 * l.raport;
-  $("titlu").textContent = "KFB " + l.kfb;
   $("gol").style.display = "none";
   const svg = $("desen");
   svg.innerHTML = "";
@@ -258,7 +286,7 @@ function aplicaLayout(l) {
 }
 const FORME = {cerc: "Circle", patrat: "Square", romb: "Diamond", triunghi: "Triangle", hexagon: "Hexagon",
                dreptunghi: "Rectangle"};
-function puncteForma(f, cx, cy, r) {               // same corners as puncte_forma() in KFB_VISIO
+function puncteForma(f, cx, cy, r) {               // same corners as puncte_forma() in VIBE
   let p;
   if (f === "patrat") { const a = r * 0.9; p = [cx - a, cy - a, cx + a, cy - a, cx + a, cy + a, cx - a, cy + a]; }
   else if (f === "romb") { const a = r * 1.15; p = [cx, cy - a, cx + a, cy, cx, cy + a, cx - a, cy]; }
@@ -383,13 +411,48 @@ function buton(text, cls, fn) {
   b.onclick = fn;
   $("foaieButoane").appendChild(b);
 }
+function opresteTestLed() {                        // Test LED: stop (the board shows its normal LED again)
+  if (st.testLed) { trimite(`TESTLED,${st.testLed.id},0`); st.testLed = null; }
+}
+function deschideTestLed(n, s) {                    // like "Test LED" in Paired SLAVE boards on the PC
+  st.testLed = {id: s.id, c: 0};
+  $("foaieStare").textContent = "Test LED: tap a color - the board lights ONLY that LED (its normal state is ignored)";
+  const fb = $("foaieButoane");
+  fb.innerHTML = "";
+  const rand = document.createElement("div");
+  rand.className = "testled";
+  for (const [c, col, nume] of [[1, "#ef4444", "RED"], [2, "#22c55e", "GREEN"], [3, "#3b82f6", "BLUE"]]) {
+    const b = document.createElement("button");
+    b.className = "cerc";
+    b.style.background = col;
+    b.textContent = nume;
+    b.onclick = () => {
+      if (!st.testLed) st.testLed = {id: s.id, c: 0};
+      st.testLed.c = c;
+      for (const x of rand.children) x.classList.toggle("ales", x === b);
+      $("foaieStare").textContent = `${nume} LED …`;
+      trimite(`TESTLED,${s.id},${c}`);
+      vibreaza(40);
+    };
+    rand.appendChild(b);
+  }
+  fb.appendChild(rand);
+  buton("Stop test", "", () => {
+    opresteTestLed();
+    for (const x of rand.children) x.classList.remove("ales");
+    $("foaieStare").textContent = "Test stopped: the LED shows its normal state again.";
+  });
+  buton("Close", "", inchideFoaie);
+}
 function inchideFoaie() {
+  opresteTestLed();
   const vechi = st.ales;
   st.ales = null;
   if (vechi) deseneazaSpot(vechi);
   $("foaie").classList.remove("deschis");
 }
 function atingeSpot(n) {
+  opresteTestLed();                                   // another spot: the LED test of the previous one stops
   const s = st.spots.get(n) || {cod: "U", id: 0, det: ""};
   if (st.muta) {                                      // MOVE: this is the target spot
     const m = st.muta;
@@ -426,6 +489,7 @@ function atingeSpot(n) {
                              () => trimite(`DESIGNATE,${s.id}`));
     if (s.cod !== "X") buton(s.cod === "L" ? "LOCATE off" : "LOCATE on", "", () => trimite(`LOCATE,${s.id}`));
     buton("Info", "", () => { st.asteptInfo = true; trimite(`INFO,${s.id}`); inchideFoaie(); });
+    buton("Test LED", "", () => deschideTestLed(n, s));
     buton("Shape…", "", () => {                      // the 6 shapes, like "Shape ▶" on the PC
       $("foaieButoane").innerHTML = "";
       const acum = detaliiSpot(s).forma;
@@ -438,7 +502,7 @@ function atingeSpot(n) {
       inchideFoaie();
       banner(`Tap the FREE spot where ID ${s.id} goes (tap "${n}" again to cancel).`, "warn");
     });
-    buton("Unpair and remove", "pericol", () => {   // KFB_VISIO asks back (ASK,...) with the recipes affected
+    buton("Unpair and remove", "pericol", () => {   // VIBE asks back (ASK,...) with the recipes affected
       trimite(`REMOVE,${s.id}`);
       inchideFoaie();
     });
@@ -447,7 +511,7 @@ function atingeSpot(n) {
   $("foaie").classList.add("deschis");
 }
 
-// ---------------------------------------------------------------- lines from KFB_VISIO / MASTER
+// ---------------------------------------------------------------- lines from VIBE / MASTER
 function actualizeazaBara() {
   const pm = st.pm, b = $("btnPm"), v = $("btnVal");
   b.disabled = !st.conectat;
@@ -490,12 +554,7 @@ function laLinie(linie) {
       return;
     case "SYNC": {
       const kfb = parseInt(p[2], 10);
-      st.kfbConectat = kfb;
-      if (!st.layout || st.layout.kfb !== kfb) {
-        const l = incarcaLayoutSalvat(kfb);
-        if (l) aplicaLayout(l);
-        else banner(`Connected to KFB ${kfb}: waiting for its spots … (☰ → Refresh all spots)`, "warn");
-      }
+      kfbConectatAcum(kfb);
       if (st.layout) {
         const necunoscute = [...st.spots.keys()].filter(n => !st.el.has(n));
         if (necunoscute.length) banner(`${necunoscute.length} spot(s) are not in this drawing: export the drawing again on the PC.`, "warn");
@@ -520,11 +579,16 @@ function laLinie(linie) {
       if (/LOGIN/.test(t)) cereParola();
       return;
     }
+    case "TL":                                        // TL,<id>,<c>,ok|err,<text>  (answer to TESTLED)
+      if (st.testLed && String(st.testLed.id) === p[1] && $("foaie").classList.contains("deschis"))
+        $("foaieStare").textContent = (p[3] === "err" ? "✕ " : "") + p.slice(4).join(",");
+      if (p[3] === "err") vibreaza([200, 100, 200]);
+      return;
     case "PONG": banner("MASTER answers (" + p.slice(1).join(",") + ")", "ok"); return;
     case "LY":                                        // spots by Bluetooth: header
       if (p[2] === "same") return;
       st.locuriNoi = {hash: p[1], n: +p[2], raport: parseFloat(p[3]), spoturi: []};
-      banner(`Receiving ${p[2]} spots from KFB_VISIO …`);
+      banner(`Receiving ${p[2]} spots from VIBE …`);
       return;
     case "LS":
       if (st.locuriNoi) st.locuriNoi.spoturi.push({n: p.slice(4).join(","), x: +p[1], y: +p[2], d: +p[3]});
@@ -541,7 +605,7 @@ function laLinie(linie) {
                  imagine: pastreaza ? vechi.imagine : "", fara_desen: !pastreaza, spoturi: ln.spoturi};
       salveazaLayout(l);
       aplicaLayout(l);
-      banner(`${l.spoturi.length} spots received from KFB_VISIO.`, "ok");
+      banner(`${l.spoturi.length} spots received from VIBE.`, "ok");
       return;
     }
     case "IMG":                                       // drawing by Bluetooth: header
@@ -562,7 +626,7 @@ function laLinie(linie) {
       if (!im) return;
       const b64 = im.parti.join("");
       if (im.primite !== im.n || b64.length !== im.len) {
-        banner(`Drawing incomplete (${im.primite} / ${im.n} pieces): send it again from KFB_VISIO.`, "err");
+        banner(`Drawing incomplete (${im.primite} / ${im.n} pieces): send it again from VIBE.`, "err");
         return;
       }
       const l = Object.assign({}, st.layout || {tip: "kfb-tableta", versiune: 1, kfb: st.kfbConectat || 0, spoturi: []});
@@ -575,16 +639,10 @@ function laLinie(linie) {
       return;
     }
   }
-  if (linie.startsWith("KFB_VISIO:")) {
-    banner(linie.replace("KFB_VISIO: ", ""), "ok");
+  if (linie.startsWith("VIBE:") || linie.startsWith("KFB_" + "VISIO:")) {   // (old PC program name)
+    banner(linie.replace(/^[A-Z_]+: /, ""), "ok");
     const m = linie.match(/KFB (\d+)/);
-    if (m) {
-      st.kfbConectat = parseInt(m[1], 10);
-      if (!st.layout || st.layout.kfb !== st.kfbConectat) {
-        const l = incarcaLayoutSalvat(st.kfbConectat);
-        if (l) aplicaLayout(l);
-      }
-    }
+    if (m) kfbConectatAcum(parseInt(m[1], 10));
     if (/LOGIN/.test(linie)) cereParola();
     else cereTot();
   }
@@ -623,10 +681,12 @@ async function conectareGatt() {
   st.rest = "";
   $("stareConn").textContent = st.device.name;
   $("stareConn").className = "pill on";
+  const mk = /KFB-(\d+)/.exec(st.device.name || "");      // the MASTER's Bluetooth name = KFB-<its number>
+  if (mk) kfbConectatAcum(parseInt(mk[1], 10));
   $("btnConn").textContent = "Reconnect";
   actualizeazaBara();
   try { st.wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
-  // KFB_VISIO greets the tablet; if the greeting was missed, ask for the spots anyway
+  // VIBE greets the tablet; if the greeting was missed, ask for the spots anyway
   setTimeout(() => { if (st.conectat && !st.kfbConectat) cereTot(); }, 2500);
 }
 async function conecteaza() {
@@ -639,9 +699,10 @@ async function conecteaza() {
       st.device = await navigator.bluetooth.requestDevice({filters: [{namePrefix: "KFB-"}], optionalServices: [NUS]});
       st.device.addEventListener("gattserverdisconnected", () => {
         st.conectat = false; st.rx = null; st.kfbConectat = null;
+        $("titlu").textContent = "KFB –";               // only the KFB connected by Bluetooth is shown
         $("stareConn").textContent = "Disconnected"; $("stareConn").className = "pill off";
         actualizeazaBara();
-        banner("Disconnected. Tap Reconnect (KFB_VISIO must be in ESP Setup).", "err");
+        banner("Disconnected. Tap Reconnect (VIBE must be in ESP Setup).", "err");
         try { st.wakeLock && st.wakeLock.release(); } catch (e) {}
       });
     }
@@ -652,7 +713,7 @@ async function conecteaza() {
     else {
       banner("Cannot connect: " + e.message, "err");
       $("stareConn").textContent = "Cannot connect"; $("stareConn").className = "pill off";
-      alert("Cannot connect.\n\nKFB_VISIO in ESP Setup? Bluetooth and Location on?\n\n" + e.message);
+      alert("Cannot connect.\n\nVIBE in ESP Setup? Bluetooth and Location on?\n\n" + e.message);
     }
   }
 }
@@ -662,7 +723,7 @@ function cereTot() {                                 // spots (only if they chan
   trimite("WATCH");
 }
 function cereParola() {
-  const p = prompt("Setup password of KFB_VISIO:");
+  const p = prompt("Setup password of VIBE:");
   if (p !== null) { trimite("LOGIN," + p); cereTot(); }
 }
 
@@ -709,8 +770,7 @@ $("fisier").onchange = e => {
 };
 
 // ---------------------------------------------------------------- start
-const salvat = incarcaLayoutSalvat(null);
-if (salvat) { aplicaLayout(salvat); banner(`KFB ${salvat.kfb}: ${salvat.spoturi.length} spots on this tablet. Tap Connect.`); }
+// nothing is shown before connecting: the title and the drawing are always those of the KFB connected by Bluetooth
 actualizeazaBara();
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(e => jurnal("offline cache: " + e));
