@@ -1,5 +1,5 @@
 // Offline cache of the KFB tablet page: after the first visit (with internet) the page also opens without internet.
-const CACHE = "kfb-tableta-v11";
+const CACHE = "kfb-tableta-v12";
 const FISIERE = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FISIERE)).then(() => self.skipWaiting()));
@@ -12,7 +12,8 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    fetch(e.request).then(r => {
+    // "no-cache": always ask GitHub (not the browser's 10-min copy) -> a new page is taken at the first opening
+    fetch(new Request(e.request.url, {cache: "no-cache"})).then(r => {
       const copie = r.clone();
       caches.open(CACHE).then(c => c.put(e.request, copie));
       return r;

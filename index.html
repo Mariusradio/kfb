@@ -641,6 +641,7 @@ function laLinie(linie) {
   }
   if (linie.startsWith("VIBE:") || linie.startsWith("KFB_" + "VISIO:")) {   // (old PC program name)
     banner(linie.replace(/^[A-Z_]+: /, ""), "ok");
+    st.salutat = true;
     const m = linie.match(/KFB (\d+)/);
     if (m) kfbConectatAcum(parseInt(m[1], 10));
     if (/LOGIN/.test(linie)) cereParola();
@@ -687,7 +688,10 @@ async function conectareGatt() {
   actualizeazaBara();
   try { st.wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
   // VIBE greets the tablet; if the greeting was missed, ask for the spots anyway
-  setTimeout(() => { if (st.conectat && !st.kfbConectat) cereTot(); }, 2500);
+  // (st.salutat, not st.kfbConectat: the KFB number is now known at once from the Bluetooth name, and the old
+  //  test then never asked -> no spots, no PAIR & MAP state on the tablet when the greeting was missed)
+  st.salutat = false;
+  setTimeout(() => { if (st.conectat && !st.salutat) cereTot(); }, 2500);
 }
 async function conecteaza() {
   if (!navigator.bluetooth) {
